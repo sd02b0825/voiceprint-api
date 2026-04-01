@@ -14,6 +14,11 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+# ============ 【新增】声纹上下文缓存 ============
+_SPEAKER_CACHE = {}          # {token: {"speaker": str, "expire_at": float}}
+_FAIL_COUNT_CACHE = {}       # {token: {"count": int, "last_fail_time": float}}
+_CACHE_TTL = 60              # 缓存有效期（秒）
+_MAX_FAIL_COUNT = 3          # 连续失败阈值，达到后触发询问
 
 @router.post(
     "/register",
