@@ -40,7 +40,9 @@ class VoiceprintService:
             logger.info("开始加载模型: iic/speech_campplus_sv_zh-cn_3dspeaker_16k")
             self._pipeline = pipeline(
                 task=Tasks.speaker_verification,
-                model="iic/speech_campplus_sv_zh-cn_3dspeaker_16k",
+                # model="iic/speech_campplus_sv_zh-cn_3dspeaker_16k",
+                model="iic/speech_eres2netv2_sv_zh-cn_16k-common",
+                # model="iic/speech_eres2net_large_200k_sv_zh-cn_16k-common",
                 device=device,
             )
 
@@ -248,16 +250,15 @@ class VoiceprintService:
         Args:
             speaker_ids: 候选说话人ID列表
             audio_bytes: 音频字节数据
-            similarity_threshold: 本次识别使用的相似度阈值
 
         Returns:
             Tuple[str, float]: (识别出的说话人ID, 相似度分数)
         """
         start_time = time.time()
         threshold = (
-            self.similarity_threshold
-            if similarity_threshold is None
-            else similarity_threshold
+            similarity_threshold
+            if similarity_threshold is not None
+            else self.similarity_threshold
         )
         logger.info(f"开始声纹识别流程，候选说话人数量: {len(speaker_ids)}")
 
