@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import time
 import threading
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
 from ..core.config import settings
@@ -237,7 +237,10 @@ class VoiceprintService:
                 audio_processor.cleanup_temp_file(audio_path)
 
     def identify_voiceprint(
-        self, speaker_ids: List[str], audio_bytes: bytes
+        self,
+        speaker_ids: List[str],
+        audio_bytes: bytes,
+        similarity_threshold: Optional[float] = None,
     ) -> Tuple[str, float]:
         """
         识别声纹
@@ -245,11 +248,17 @@ class VoiceprintService:
         Args:
             speaker_ids: 候选说话人ID列表
             audio_bytes: 音频字节数据
+            similarity_threshold: 本次识别使用的相似度阈值
 
         Returns:
             Tuple[str, float]: (识别出的说话人ID, 相似度分数)
         """
         start_time = time.time()
+        threshold = (
+            self.similarity_threshold
+            if similarity_threshold is None
+            else similarity_threshold
+        )
         logger.info(f"开始声纹识别流程，候选说话人数量: {len(speaker_ids)}")
 
         audio_path = None
@@ -305,9 +314,9 @@ class VoiceprintService:
             match_score = similarities[match_name]
 
             # 检查是否超过阈值
-            if match_score < self.similarity_threshold:
+            if match_score < threshold:
                 logger.info(
-                    f"未识别到说话人，最高分: {match_score:.4f}，阈值: {self.similarity_threshold}"
+                    f"未识别到说话人，最高分: {match_score:.4f}，阈值: {threshold}"
                 )
                 total_time = time.time() - start_time
                 logger.info(f"声纹识别流程完成，总耗时: {total_time:.3f}秒")

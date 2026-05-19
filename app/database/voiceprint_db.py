@@ -114,6 +114,29 @@ class VoiceprintDB:
             logger.error(f"删除声纹特征失败 {speaker_id}: {e}")
             return False
 
+    def get_system_param(self, param_code: str) -> Optional[str]:
+        """
+        根据参数编码读取系统参数值
+
+        Args:
+            param_code: 参数编码
+
+        Returns:
+            Optional[str]: 参数值，不存在或读取失败时返回 None
+        """
+        try:
+            with db_connection.get_cursor() as cursor:
+                sql = "SELECT param_value FROM sys_params WHERE param_code = %s LIMIT 1"
+                cursor.execute(sql, (param_code,))
+                result = cursor.fetchone()
+                if not result:
+                    logger.warning(f"未找到系统参数: {param_code}")
+                    return None
+                return str(result[0]) if result[0] is not None else None
+        except Exception as e:
+            logger.error(f"读取系统参数失败 {param_code}: {e}")
+            return None
+
     def count_voiceprints(self) -> int:
         """
         获取声纹特征总数

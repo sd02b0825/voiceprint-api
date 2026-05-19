@@ -4,6 +4,7 @@ from typing import List
 import time
 from ...models.voiceprint import VoiceprintRegisterResponse, VoiceprintIdentifyResponse
 from ...services.voiceprint_service import voiceprint_service
+from ...database.voiceprint_db import voiceprint_db
 from ...api.dependencies import AuthorizationToken
 from ...core.logger import get_logger
 
@@ -19,6 +20,32 @@ _SPEAKER_CACHE = {}          # {token: {"speaker": str, "expire_at": float}}
 _FAIL_COUNT_CACHE = {}       # {token: {"count": int, "last_fail_time": float}}
 _CACHE_TTL = 60              # 缓存有效期（秒）
 _MAX_FAIL_COUNT = 3          # 连续失败阈值，达到后触发询问
+_VOICEPRINT_SIMILARITY_THRESHOLD_PARAM = "server.voiceprint_similarity_threshold"
+_DEFAULT_VOICEPRINT_SIMILARITY_THRESHOLD = 0.4
+
+
+def _get_voiceprint_similarity_threshold() -> float:
+    """从数据库读取声纹相似度阈值，异常或配置无效时使用默认值。"""
+    param_value = voiceprint_db.get_system_param(_VOICEPRINT_SIMILARITY_THRESHOLD_PARAM)
+    if param_value is None:
+        return _DEFAULT_VOICEPRINT_SIMILARITY_THRESHOLD
+
+    try:
+        threshold = float(param_value)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"声纹相似度阈值配置无效: {param_value}，使用默认值: {_DEFAULT_VOICEPRINT_SIMILARITY_THRESHOLD}"
+        )
+        return _DEFAULT_VOICEPRINT_SIMILARITY_THRESHOLD
+
+    if not 0.0 <= threshold <= 1.0:
+        logger.warning(
+            f"声纹相似度阈值超出范围: {threshold}，使用默认值: {_DEFAULT_VOICEPRINT_SIMILARITY_THRESHOLD}"
+        )
+        return _DEFAULT_VOICEPRINT_SIMILARITY_THRESHOLD
+
+    return threshold
+
 
 @router.post(
     "/register",
@@ -118,11 +145,14 @@ async def identify_voiceprint(
             f"音频文件读取完成，大小: {len(audio_bytes)}字节，耗时: {read_time:.3f}秒"
         )
 
+        similarity_threshold = _get_voiceprint_similarity_threshold()
+        logger.info(f"本次声纹识别相似度阈值: {similarity_threshold}")
+
         # 识别声纹
         identify_start = time.time()
         logger.info("开始调用声纹识别服务...")
         match_name, match_score = voiceprint_service.identify_voiceprint(
-            candidate_ids, audio_bytes
+            candidate_ids, audio_bytes, similarity_threshold=similarity_threshold
         )
         identify_time = time.time() - identify_start
         logger.info(f"声纹识别服务调用完成，耗时: {identify_time:.3f}秒")
@@ -134,7 +164,7 @@ async def identify_voiceprint(
         # ============ 【新增】上下文 fallback + 连续失败检测 ============
         now = time.time()
         token_key = str(token.token if hasattr(token, 'token') else token)  # 兼容 token 类型
-        is_valid = match_name and match_score >= 0.4  # 判定识别成功
+        is_valid = bool(match_name) and match_score >= similarity_threshold  # 判定识别成功
          
         if is_valid:
             # ✅ 识别成功：更新说话人缓存 + 清空失败计数    
