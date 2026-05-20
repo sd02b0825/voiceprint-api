@@ -33,8 +33,17 @@ class VoiceprintIdentifyRequest(BaseModel):
 class VoiceprintIdentifyResponse(BaseModel):
     """声纹识别响应模型"""
 
-    speaker_id: str
-    score: float
+    status: str
+    speaker_id: str = ""
+    score: float = 0.0
+    reason: str = ""
 
     class Config:
-        schema_extra = {"example": {"speaker_id": "user_001", "score": 0.85}}
+        schema_extra = {
+            "example": {
+                "status": "RECOGNIZED",
+                "speaker_id": "user_001",
+                "score": 0.85,
+                "reason": "声纹识别成功",
+            }
+        }

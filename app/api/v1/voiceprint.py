@@ -14,12 +14,6 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-# ============ 【新增】声纹上下文缓存 ============
-_SPEAKER_CACHE = {}          # {token: {"speaker": str, "expire_at": float}}
-_FAIL_COUNT_CACHE = {}       # {token: {"count": int, "last_fail_time": float}}
-_CACHE_TTL = 60              # 缓存有效期（秒）
-_MAX_FAIL_COUNT = 3          # 连续失败阈值，达到后触发询问
-
 @router.post(
     "/register",
     summary="声纹注册",
@@ -134,55 +128,21 @@ async def identify_voiceprint(
         logger.info(
             f"声纹识别请求完成，总耗时: {total_time:.3f}秒，识别结果: {match_name}, 分数: {match_score:.4f}"
         )
-        # ============ 【新增】上下文 fallback + 连续失败检测 ============
-        now = time.time()
-        token_key = str(token.token if hasattr(token, 'token') else token)  # 兼容 token 类型
-        is_valid = match_name and match_score >= similarity_threshold  # 判定识别成功
-         
-        if is_valid:
-            # ✅ 识别成功：更新说话人缓存 + 清空失败计数    
-            _SPEAKER_CACHE[token_key] = {
-                "speaker": match_name, 
-                "expire_at": now + _CACHE_TTL, 
-                "match_score": match_score
-            }
-            _FAIL_COUNT_CACHE.pop(token_key, None)  # 【新增】清空失败计数
-            logger.info(f"识别成功，已更新缓存：{match_name}")
-            
-        else:
-            # ❌ 识别失败：尝试复用缓存 + 累计失败次数
-            cached = _SPEAKER_CACHE.get(token_key)
-            
-            if cached and now < cached["expire_at"]:
-                # 有有效缓存：复用上次说话人
-                match_name = cached["speaker"]
-                match_score = cached["match_score"]
-                logger.info(f"沿用上一个说话人 识别结果：{match_name}, 分数：{match_score:.4f}")
-                # 刷新缓存有效期（保持原有逻辑）
-                _SPEAKER_CACHE[token_key] = {
-                    "speaker": match_name, 
-                    "expire_at": now + _CACHE_TTL, 
-                    "match_score": match_score
-                }
-            
-            # 【新增】累计失败次数（60 秒内连续）
-            fail_entry = _FAIL_COUNT_CACHE.get(token_key, {"count": 0, "last_fail_time": 0})
-            # 如果距离上次失败超过 60 秒，重新计数（避免长时间累积）
-            if now - fail_entry["last_fail_time"] > 60:
-                fail_entry = {"count": 0, "last_fail_time": now}
-            fail_entry["count"] += 1
-            fail_entry["last_fail_time"] = now
-            _FAIL_COUNT_CACHE[token_key] = fail_entry
-            logger.info(f"连续识别失败计数：{fail_entry['count']}")
-            
-            # 🎯 连续失败达到阈值 + 有缓存说话人 → 标记需要确认
-            if fail_entry["count"] >= _MAX_FAIL_COUNT and cached and now < cached["expire_at"]:
-                match_score = -2.0  # 【特殊标记】业务方检测到 -2.0 时触发询问
-                fail_entry["count"] = 0
-                _FAIL_COUNT_CACHE[token_key] = fail_entry
-                logger.info(f"连续失败{fail_entry['count']}次，触发确认询问：{cached['speaker']}")
-        # ============ 上下文逻辑结束 ============
-        return VoiceprintIdentifyResponse(speaker_id=match_name, score=match_score)
+
+        if match_name and match_score >= similarity_threshold:
+            return VoiceprintIdentifyResponse(
+                status="RECOGNIZED",
+                speaker_id=match_name,
+                score=match_score,
+                reason="声纹识别成功",
+            )
+
+        return VoiceprintIdentifyResponse(
+            status="UNKNOWN",
+            speaker_id="",
+            score=match_score,
+            reason="声纹未命中",
+        )
 
     except HTTPException:
         total_time = time.time() - start_time
@@ -191,7 +151,12 @@ async def identify_voiceprint(
     except Exception as e:
         total_time = time.time() - start_time
         logger.error(f"声纹识别异常，总耗时: {total_time:.3f}秒，错误: {e}")
-        raise HTTPException(status_code=500, detail=f"声纹识别失败: {str(e)}")
+        return VoiceprintIdentifyResponse(
+            status="SERVICE_ERROR",
+            speaker_id="",
+            score=0.0,
+            reason=f"声纹识别失败: {str(e)}",
+        )
 
 
 @router.delete(
